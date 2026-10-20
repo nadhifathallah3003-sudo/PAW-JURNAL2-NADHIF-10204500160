@@ -1,0 +1,119 @@
+<?php
+// tambah_tugas.php
+session_start();
+require 'koneksi.php';
+
+if (empty($_SESSION['token'])) {
+    $_SESSION['token'] = bin2hex(random_bytes(32));
+}
+
+$hasil_mk = mysqli_query($conn, "SELECT id, kode, nama FROM mata_kuliah ORDER BY kode ASC");
+
+$mata_kuliah_id = (int) ($_GET['mata_kuliah_id'] ?? 0);
+$judul = '';
+$instruksi = '';
+$tenggat = '';
+$status = 'Draf';
+$pesan = '';
+
+if (isset($_POST['simpan'])) {
+    if (!isset($_POST['token']) || !hash_equals($_SESSION['token'], $_POST['token'])) {
+        $pesan = 'ERROR J05 — Token keamanan tidak valid atau telah kedaluwarsa.';
+    } else {
+        $mata_kuliah_id = (int) ($_POST['mata_kuliah_id'] ?? 0);
+        $judul = trim($_POST['judul'] ?? '');
+        $instruksi = trim($_POST['instruksi'] ?? '');
+        $tenggat = trim($_POST['tenggat'] ?? '');
+        $status = trim($_POST['status'] ?? '');
+
+        // Validasi kolom
+        $cek_tanggal = DateTime::createFromFormat('Y-m-d', $tenggat);
+        $tanggal_valid = ($cek_tanggal && $cek_tanggal->format('Y-m-d') === $tenggat);
+
+        if ($mata_kuliah_id <= 0 || $judul === '' || $instruksi === '' || $tenggat === '' || $status === '') {
+            $pesan = 'Semua kolom wajib diisi.';
+        } elseif (strlen($judul) < 3 || strlen($judul) > 150) {
+            $pesan = 'Judul tugas harus 3-150 karakter.';
+        } elseif (strlen($instruksi) < 3 || strlen($instruksi) > 2000) {
+            $pesan = 'Instruksi tugas harus 3-2000 karakter.';
+        } elseif (!$tanggal_valid) {
+            $pesan = 'Pilih tanggal tenggat yang valid (format: YYYY-MM-DD).';
+        } elseif (!in_array($status, ['Draf', 'Aktif', 'Selesai'])) {
+            $pesan = 'Status hanya boleh Draf, Aktif, atau Selesai.';
+        } else {
+            // Periksa mata kuliah
+            $stmt_cek = $conn->prepare("SELECT id FROM mata_kuliah WHERE id = ?");
+            $stmt_cek->bind_param("i", $mata_kuliah_id);
+            $stmt_cek->execute();
+            if ($stmt_cek->get_result()->num_rows === 0) {
+                $pesan = 'Mata kuliah yang dipilih tidak ditemukan.';
+            } else {
+                $stmt_ins = $conn->prepare("INSERT INTO tugas (mata_kuliah_id, judul, instruksi, tenggat, status) VALUES (?, ?, ?, ?, ?)");
+                $stmt_ins->bind_param("issss", $mata_kuliah_id, $judul, $instruksi, $tenggat, $status);
+                $stmt_ins->execute();
+
+                $_SESSION['pesan'] = 'Tugas "' . $judul . '" berhasil ditambahkan.';
+                header('Location: daftar_tugas.php');
+                exit;
+            }
+        }
+    }
+}
+?>
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Tambah Tugas - LMS EAD</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body><main>
+    <div class="menu">
+        <a href="index.php">Beranda</a> |
+        <a href="daftar_mata_kuliah.php">Mata Kuliah</a> |
+        <a href="daftar_materi.php">Materi</a> |
+        <a href="daftar_tugas.php">Tugas</a>
+    </div>
+
+    <p class="label">LMS EAD / TAMBAH TUGAS</p>
+    <h1>Tambah tugas</h1>
+    <p><a href="daftar_tugas.php">Kembali ke daftar</a></p>
+
+    <?php if ($pesan != ''): ?>
+        <div class="kesalahan"><?= htmlspecialchars($pesan, ENT_QUOTES, 'UTF-8') ?></div>
+    <?php endif; ?>
+
+    <form method="post">
+        <input type="hidden" name="token" value="<?= htmlspecialchars($_SESSION['token'], ENT_QUOTES, 'UTF-8') ?>">
+
+        <label for="mata_kuliah_id">Mata kuliah</label>
+        <select id="mata_kuliah_id" name="mata_kuliah_id" required>
+            <option value="">Pilih Mata kuliah</option>
+            <?php while ($mk = mysqli_fetch_assoc($hasil_mk)): ?>
+                <option value="<?= $mk['id'] ?>" <?= ($mata_kuliah_id == $mk['id']) ? 'selected' : '' ?>>
+                    <?= htmlspecialchars($mk['kode'], ENT_QUOTES, 'UTF-8') ?> - <?= htmlspecialchars($mk['nama'], ENT_QUOTES, 'UTF-8') ?>
+                </option>
+            <?php endwhile; ?>
+        </select>
+
+        <label for="judul">Judul tugas</label>
+        <input id="judul" name="judul" maxlength="150" value="<?= htmlspecialchars($judul, ENT_QUOTES, 'UTF-8') ?>" placeholder="Contoh: Latihan CRUD" required>
+
+        <label for="instruksi">Instruksi tugas</label>
+        <textarea id="instruksi" name="instruksi" rows="6" placeholder="Petunjuk pengerjaan..." required><?= htmlspecialchars($instruksi, ENT_QUOTES, 'UTF-8') ?></textarea>
+
+        <label for="tenggat">Tenggat</label>
+        <input id="tenggat" name="tenggat" type="date" value="<?= htmlspecialchars($tenggat, ENT_QUOTES, 'UTF-8') ?>" required>
+
+        <label for="status">Status</label>
+        <select id="status" name="status" required>
+            <option value="Draf" <?= ($status === 'Draf') ? 'selected' : '' ?>>Draf</option>
+            <option value="Aktif" <?= ($status === 'Aktif') ? 'selected' : '' ?>>Aktif</option>
+            <option value="Selesai" <?= ($status === 'Selesai') ? 'selected' : '' ?>>Selesai</option>
+        </select>
+
+        <button name="simpan">Simpan data</button>
+        <a href="daftar_tugas.php">Batal</a>
+    </form>
+</main></body>
+</html>
